@@ -23,6 +23,7 @@ metadata {
         input name: "ntfyAttachUrl", type: "text", title: "Optional Attachment URL (image/file to attach)", required: false
         input name: "ntfyAttachFilename", type: "text", title: "Optional Attachment Filename (if URL provided)", required: false
         input name: "ntfyIconUrl", type: "text", title: "Optional Custom Icon URL", required: false
+        input name: "ntfySequenceId", type: "text", title: "Optional Sequence ID (for replacing/clearing notifications)", required: false
         input name: "ntfyMarkdown", type: "bool", title: "Enable Markdown Formatting", defaultValue: false, required: false
         input name: "ntfyScheduling", type: "enum", title: "Optional Message Scheduling", defaultValue: "none", required: false,
               options: ["none":"Send Immediately", "delay":"Delay by Minutes", "at":"Send at Specific Time"]
@@ -75,12 +76,62 @@ void deviceNotification(String msg) {
         return
     }
 
-    def uri = buildNotificationUri()
-    def headers = buildHeaders()
+    def overrideKeys = [
+        "topic", "title", "priority", "tags", "clickaction", "actionurl", "attachmenturl", "attachmentfilename", "iconurl", "sequenceid", "message"
+    ]
+    def jsonOverride = null
+    try {
+        jsonOverride = groovy.json.JsonSlurper.newInstance().parseText(msg)
+    } catch (Exception e) {
+        jsonOverride = null
+    }
+
+    def useOverride = false
+    if (jsonOverride instanceof Map) {
+        // Check if at least one valid key is present
+        useOverride = overrideKeys.any { k -> jsonOverride.containsKey(k) }
+    }
+
+    def uri
+    def headers
+    def body
+
+    if (useOverride) {
+        // Build URI and headers using overrides
+        uri = "${ntfyProtocol}://${ntfyHost.trim()}/${jsonOverride.topic ?: ntfyTopic.trim()}"
+        headers = [:]
+        if (jsonOverride.title) headers["Title"] = jsonOverride.title
+        if (jsonOverride.priority) headers["Priority"] = jsonOverride.priority
+        if (jsonOverride.tags) headers["Tags"] = jsonOverride.tags
+        if (jsonOverride.clickaction && jsonOverride.actionurl) {
+            if (jsonOverride.clickaction == "open_url" || jsonOverride.clickaction == "view") {
+                headers["Click"] = jsonOverride.actionurl
+            } else if (jsonOverride.clickaction == "http_request" || jsonOverride.clickaction == "http") {
+                headers["Actions"] = "http, Open, ${jsonOverride.actionurl}"
+            }
+        }
+        if (jsonOverride.attachmenturl) headers["Attach"] = jsonOverride.attachmenturl
+        if (jsonOverride.attachmentfilename) headers["Filename"] = jsonOverride.attachmentfilename
+        if (jsonOverride.iconurl) headers["Icon"] = jsonOverride.iconurl
+        if (jsonOverride.sequenceid) headers["X-Sequence-Id"] = jsonOverride.sequenceid
+        // Use authentication if configured
+        if (ntfyUsername && ntfyUsername.trim() && ntfyPassword && ntfyPassword.trim()) {
+            def credentials = "${ntfyUsername.trim()}:${ntfyPassword}".bytes.encodeBase64().toString()
+            headers["Authorization"] = "Basic ${credentials}"
+        }
+        // Use markdown if enabled
+        if (ntfyMarkdown) headers["Markdown"] = "yes"
+        // Scheduling not supported in override
+        body = jsonOverride.message ?: msg
+    } else {
+        uri = buildNotificationUri()
+        headers = buildHeaders()
+        body = msg.trim()
+    }
 
     def params = [
         uri: uri,
-        body: msg.trim(),
+        body: body,
         headers: headers,
         contentType: "text/plain",
         timeout: 30
@@ -88,7 +139,7 @@ void deviceNotification(String msg) {
 
     logDebug "Sending notification to: ${uri}"
     logDebug "Headers: ${headers}"
-    logDebug "Message body: '${msg.trim()}'"
+    logDebug "Message body: '${body}'"
 
     try {
         httpPost(params) { resp ->
@@ -320,6 +371,12 @@ private Map buildHeaders() {
     if (ntfyIconUrl && ntfyIconUrl.trim()) {
         headers["Icon"] = ntfyIconUrl.trim()
         logDebug "Added custom icon: ${ntfyIconUrl.trim()}"
+    }
+
+    // Add sequence-id if provided
+    if (ntfySequenceId && ntfySequenceId.trim()) {
+        headers["X-Sequence-Id"] = ntfySequenceId.trim()
+        logDebug "Added sequence-id: ${ntfySequenceId.trim()}"
     }
 
     // Add markdown formatting if enabled
