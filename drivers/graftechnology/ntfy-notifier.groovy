@@ -20,6 +20,7 @@ metadata {
         input name: "ntfyClickAction", type: "enum", title: "Optional Click Action", defaultValue: "none", required: false,
               options: ["none":"None", "view":"Open URL", "http":"HTTP Request"]
         input name: "ntfyActionUrl", type: "text", title: "Action URL (required if click action selected)", required: false
+        input name: "ntfyActionText", type: "text", title: "Action text (for http request action)", defaultValue: "Open", required: false
         input name: "ntfyAttachUrl", type: "text", title: "Optional Attachment URL (image/file to attach)", required: false
         input name: "ntfyAttachFilename", type: "text", title: "Optional Attachment Filename (if URL provided)", required: false
         input name: "ntfyIconUrl", type: "text", title: "Optional Custom Icon URL", required: false
@@ -77,7 +78,7 @@ void deviceNotification(String msg) {
     }
 
     def overrideKeys = [
-        "topic", "title", "priority", "tags", "clickaction", "actionurl", "attachmenturl", "attachmentfilename", "iconurl", "sequenceid", "message"
+        "topic", "title", "priority", "tags", "clickaction", "actionurl", "attachmenturl", "attachmentfilename", "iconurl", "sequenceid", "message", "actiontext"
     ]
     def jsonOverride = null
     try {
@@ -350,7 +351,7 @@ private Map buildHeaders() {
             headers["Click"] = ntfyActionUrl.trim()
             logDebug "Added view click action: ${ntfyActionUrl.trim()}"
         } else if (ntfyClickAction == "http") {
-            headers["Actions"] = "http, Open, ${ntfyActionUrl.trim()}"
+            headers["Actions"] = "http, ${jsonOverride.actiontext}, ${ntfyActionUrl.trim()}"
             logDebug "Added HTTP click action: ${ntfyActionUrl.trim()}"
         }
     }
